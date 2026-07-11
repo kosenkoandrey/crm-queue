@@ -1,0 +1,371 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Очередь CRM: логика откладывания карточек</title>
+<style>
+  :root {
+    --paper: #FAF8F5;
+    --card: #FFFFFF;
+    --ink: #23272B;
+    --ink-soft: #5C6470;
+    --line: #E4DFD8;
+    --accent: #D64541;
+    --accent-soft: #FBEAE9;
+    --good: #2E7D4F;
+    --good-soft: #E3F1E8;
+    --wait: #B07818;
+    --wait-soft: #FBF2DE;
+    --sleep: #5B6BAE;
+    --sleep-soft: #E9ECF8;
+    --dead: #8A8F98;
+    --dead-soft: #EEEEEC;
+    --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --paper: #1C1E21;
+      --card: #26292E;
+      --ink: #E8E6E1;
+      --ink-soft: #9BA1AB;
+      --line: #3A3E45;
+      --accent: #E06561;
+      --accent-soft: #3C2827;
+      --good: #6FBF8F;
+      --good-soft: #24352B;
+      --wait: #D9A84E;
+      --wait-soft: #383021;
+      --sleep: #8B99D6;
+      --sleep-soft: #282D40;
+      --dead: #7D828B;
+      --dead-soft: #2E3034;
+    }
+  }
+  :root[data-theme="light"] {
+    --paper: #FAF8F5; --card: #FFFFFF; --ink: #23272B; --ink-soft: #5C6470;
+    --line: #E4DFD8; --accent: #D64541; --accent-soft: #FBEAE9;
+    --good: #2E7D4F; --good-soft: #E3F1E8; --wait: #B07818; --wait-soft: #FBF2DE;
+    --sleep: #5B6BAE; --sleep-soft: #E9ECF8; --dead: #8A8F98; --dead-soft: #EEEEEC;
+  }
+  :root[data-theme="dark"] {
+    --paper: #1C1E21; --card: #26292E; --ink: #E8E6E1; --ink-soft: #9BA1AB;
+    --line: #3A3E45; --accent: #E06561; --accent-soft: #3C2827;
+    --good: #6FBF8F; --good-soft: #24352B; --wait: #D9A84E; --wait-soft: #383021;
+    --sleep: #8B99D6; --sleep-soft: #282D40; --dead: #7D828B; --dead-soft: #2E3034;
+  }
+
+  body {
+    background: var(--paper);
+    color: var(--ink);
+    font: 16px/1.6 system-ui, -apple-system, "Segoe UI", sans-serif;
+    margin: 0;
+    padding: 48px 20px 80px;
+  }
+  main { max-width: 880px; margin: 0 auto; }
+
+  h1 {
+    font-size: 30px; line-height: 1.25; font-weight: 750;
+    letter-spacing: -0.02em; text-wrap: balance; margin: 0 0 8px;
+  }
+  .lede { color: var(--ink-soft); margin: 0 0 6px; max-width: 62ch; }
+  .stamp {
+    font-family: var(--mono); font-size: 12.5px; color: var(--ink-soft);
+    margin: 0 0 40px;
+  }
+
+  h2 {
+    font-size: 20px; font-weight: 700; letter-spacing: -0.01em;
+    margin: 52px 0 6px;
+  }
+  .h2-sub { color: var(--ink-soft); font-size: 14.5px; margin: 0 0 20px; max-width: 68ch; }
+
+  .principle {
+    border-left: 3px solid var(--accent);
+    background: var(--card);
+    border-radius: 0 10px 10px 0;
+    padding: 16px 20px;
+    margin: 0 0 8px;
+    max-width: 70ch;
+  }
+  .principle strong { color: var(--accent); }
+
+  /* ── шаги ── */
+  .steps { display: flex; flex-direction: column; gap: 10px; }
+  .step {
+    display: grid;
+    grid-template-columns: 250px 1fr 190px;
+    gap: 16px;
+    align-items: center;
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 14px 18px;
+  }
+  @media (max-width: 720px) {
+    .step { grid-template-columns: 1fr; gap: 8px; }
+  }
+  .step-name { font-weight: 650; font-size: 15.5px; }
+  .step-name small {
+    display: block; font-weight: 400; font-family: var(--mono);
+    font-size: 11.5px; color: var(--ink-soft); margin-top: 2px;
+  }
+  .step-effect { font-size: 14.5px; color: var(--ink-soft); }
+  .step-effect b { color: var(--ink); font-weight: 600; }
+  .step-return { justify-self: end; text-align: right; }
+  @media (max-width: 720px) { .step-return { justify-self: start; text-align: left; } }
+
+  .chip {
+    display: inline-block; font-size: 13px; font-weight: 650;
+    padding: 4px 12px; border-radius: 999px; white-space: nowrap;
+  }
+  .chip small { display: block; font-weight: 400; font-size: 11px; opacity: .85; }
+  .chip-good  { background: var(--good-soft);  color: var(--good); }
+  .chip-wait  { background: var(--wait-soft);  color: var(--wait); }
+  .chip-sleep { background: var(--sleep-soft); color: var(--sleep); }
+  .chip-acc   { background: var(--accent-soft); color: var(--accent); }
+  .chip-dead  { background: var(--dead-soft);  color: var(--dead); }
+
+  /* ── таймлайн пинг-цикла ── */
+  .timeline-wrap { overflow-x: auto; padding-bottom: 6px; }
+  .timeline {
+    display: flex; align-items: stretch; gap: 0;
+    min-width: 760px; margin-top: 18px;
+  }
+  .t-node {
+    flex: 0 0 auto; width: 128px;
+    background: var(--card); border: 1px solid var(--line); border-radius: 12px;
+    padding: 12px 12px 10px; text-align: center;
+  }
+  .t-node .t-title { font-weight: 650; font-size: 14px; }
+  .t-node .t-desc { font-size: 12px; color: var(--ink-soft); margin-top: 4px; line-height: 1.45; }
+  .t-node.t-final { border-color: var(--sleep); background: var(--sleep-soft); }
+  .t-node.t-final .t-title { color: var(--sleep); }
+  .t-gap {
+    flex: 1 1 40px; min-width: 46px; position: relative;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .t-gap::before {
+    content: ""; position: absolute; left: 0; right: 0; top: 50%;
+    border-top: 2px dashed var(--line);
+  }
+  .t-gap span {
+    position: relative; background: var(--paper);
+    font-family: var(--mono); font-size: 11.5px; color: var(--wait);
+    padding: 0 6px; white-space: nowrap;
+  }
+  .t-escape {
+    margin-top: 14px; font-size: 14px; color: var(--ink-soft); max-width: 68ch;
+  }
+  .t-escape b { color: var(--good); }
+
+  /* ── лесенка приоритетов ── */
+  .ladder { display: flex; flex-direction: column; gap: 8px; counter-reset: rung; }
+  .rung {
+    display: grid; grid-template-columns: 44px 200px 1fr; gap: 14px;
+    align-items: center;
+    background: var(--card); border: 1px solid var(--line); border-radius: 10px;
+    padding: 10px 16px;
+  }
+  @media (max-width: 640px) { .rung { grid-template-columns: 44px 1fr; } .rung .rung-desc { grid-column: 2; } }
+  .rung-n {
+    font-family: var(--mono); font-size: 20px; font-weight: 700;
+    color: var(--accent); font-variant-numeric: tabular-nums;
+  }
+  .rung-name { font-weight: 650; font-size: 15px; }
+  .rung-name small { display: block; font-family: var(--mono); font-weight: 400; font-size: 11px; color: var(--ink-soft); }
+  .rung-desc { font-size: 13.5px; color: var(--ink-soft); }
+  .ladder-note { font-size: 13.5px; color: var(--ink-soft); margin-top: 14px; max-width: 68ch; }
+  .ladder-note code { font-family: var(--mono); font-size: 12.5px; }
+
+  /* ── лейны ── */
+  .lanes { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; margin-top: 16px; }
+  .lane {
+    background: var(--card); border: 1px solid var(--line); border-radius: 10px;
+    padding: 12px 14px;
+  }
+  .lane b { display: block; font-size: 14px; margin-bottom: 4px; }
+  .lane span { font-size: 12.5px; color: var(--ink-soft); line-height: 1.5; display: block; }
+
+  /* ── настройки ── */
+  .settings-scroll { overflow-x: auto; }
+  table.settings {
+    border-collapse: collapse; width: 100%; min-width: 560px;
+    background: var(--card); border: 1px solid var(--line); border-radius: 12px;
+    overflow: hidden; font-size: 14px;
+  }
+  .settings th, .settings td { text-align: left; padding: 10px 16px; border-bottom: 1px solid var(--line); }
+  .settings tr:last-child td { border-bottom: none; }
+  .settings th {
+    font-size: 11.5px; text-transform: uppercase; letter-spacing: .07em;
+    color: var(--ink-soft); font-weight: 600; background: var(--paper);
+  }
+  .settings td.val { font-family: var(--mono); font-weight: 650; color: var(--accent); white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .settings td.key { font-family: var(--mono); font-size: 12.5px; color: var(--ink-soft); }
+
+  /* ── шероховатости ── */
+  .quirks { display: flex; flex-direction: column; gap: 10px; }
+  .quirk {
+    background: var(--card); border: 1px solid var(--line);
+    border-left: 3px solid var(--wait);
+    border-radius: 0 10px 10px 0; padding: 12px 18px; font-size: 14.5px;
+  }
+  .quirk b { display: block; margin-bottom: 2px; }
+  .quirk span { color: var(--ink-soft); font-size: 13.5px; }
+
+  footer {
+    margin-top: 56px; padding-top: 16px; border-top: 1px solid var(--line);
+    font-size: 12.5px; color: var(--ink-soft);
+  }
+</style>
+</head>
+<body>
+<main>
+  <h1>Что происходит с карточкой после обработки</h1>
+  <p class="lede">Логика очереди CRM художников: менеджер фиксирует шаг — а когда карточка вернётся в работу, решает система по правилам ниже.</p>
+  <p class="stamp">Снимок от 2026-07-11 · значения из настроек прода redpointschool.com/crm</p>
+
+  <div class="principle">
+    <strong>Главный принцип:</strong> карточка не откладывается «вручную на дату». Менеджер только записывает, что произошло (написал / ответил / отказался…), — статус, счётчики и дата возврата вычисляются автоматически. Поэтому одна и та же карточка честно «всплывает» снова и снова, пока история не доведена до финала.
+  </div>
+
+  <h2>Семь шагов менеджера — и когда карточка вернётся</h2>
+  <p class="h2-sub">Это все варианты из формы «Что сделать» на карточке. Третьей колонкой — через сколько дней и в какой группе карточка появится в очереди снова.</p>
+
+  <div class="steps">
+    <div class="step">
+      <div class="step-name">Написал — жду ответа<small>пинг</small></div>
+      <div class="step-effect">Статус <b>«В работе»</b>, счётчик пингов серии +1. После <b>3-го пинга</b> без ответа — автоматический сон на 4 месяца.</div>
+      <div class="step-return"><span class="chip chip-wait">через 2 дня<small>группа «Напомнить»</small></span></div>
+    </div>
+    <div class="step">
+      <div class="step-name">Ответил — общаемся дальше<small>ответ художника</small></div>
+      <div class="step-effect">Серия пингов <b>сбрасывается в ноль</b> — три попытки снова доступны. Диалог живой, карточка в приоритете №1.</div>
+      <div class="step-return"><span class="chip chip-good">через 2 дня<small>группа «Диалог»</small></span></div>
+    </div>
+    <div class="step">
+      <div class="step-name">Не откликается — усыпить<small>ручной сон</small></div>
+      <div class="step-effect">Статус <b>«Спит»</b>. Если менеджер указал дату — проснётся ровно в неё; без даты — автоматически через 4 месяца после последнего касания.</div>
+      <div class="step-return"><span class="chip chip-sleep">4 мес (или дата)<small>пачка «Проснулись»</small></span></div>
+    </div>
+    <div class="step">
+      <div class="step-name">Отказался<small>с причиной</small></div>
+      <div class="step-effect">Статус <b>«Отказался»</b>. Через год система предлагает попробовать ещё раз — люди меняют обстоятельства.</div>
+      <div class="step-return"><span class="chip chip-sleep">через 12 мес<small>пачка «Проснулись»</small></span></div>
+    </div>
+    <div class="step">
+      <div class="step-name">Не подходит нам<small>наше решение</small></div>
+      <div class="step-effect">Статус <b>«Не подходит»</b> — единственный необратимый выход. В отличие от отказа художника, наше «нет» не пересматривается.</div>
+      <div class="step-return"><span class="chip chip-dead">никогда</span></div>
+    </div>
+    <div class="step">
+      <div class="step-name">Сделана карточка 🎉<small>цель достигнута</small></div>
+      <div class="step-effect">Статус <b>«Карточка»</b> — воронка пройдена. Карточка уходит из очереди насовсем.</div>
+      <div class="step-return"><span class="chip chip-good">выходит из очереди</span></div>
+    </div>
+    <div class="step">
+      <div class="step-name">Просто заметка<small>ничего не меняет</small></div>
+      <div class="step-effect"><b>Не двигает карточку.</b> Статус, серия пингов и дата возврата остаются как были — карточка не «обработана» и может тут же показаться снова.</div>
+      <div class="step-return"><span class="chip chip-acc">остаётся в очереди</span></div>
+    </div>
+  </div>
+
+  <h2>Пинг-цикл: три попытки, потом сон</h2>
+  <p class="h2-sub">Так живёт карточка, если художник молчит. Между сообщениями — 2 дня (изменено 10.07.2026, раньше был 1 день).</p>
+
+  <div class="timeline-wrap">
+    <div class="timeline">
+      <div class="t-node"><div class="t-title">Пинг 1</div><div class="t-desc">первое сообщение</div></div>
+      <div class="t-gap"><span>2 дня</span></div>
+      <div class="t-node"><div class="t-title">Пинг 2</div><div class="t-desc">напоминание</div></div>
+      <div class="t-gap"><span>2 дня</span></div>
+      <div class="t-node"><div class="t-title">Пинг 3</div><div class="t-desc">последний; система подсказывает сменить канал</div></div>
+      <div class="t-gap"><span>2 дня</span></div>
+      <div class="t-node t-final"><div class="t-title">Автосон</div><div class="t-desc">4 месяца, затем пачка «Проснулись»</div></div>
+    </div>
+  </div>
+
+  <p class="t-escape">Выход из цикла в любой момент: <b>художник ответил</b> — серия обнуляется, карточка переходит в «Диалог», и у менеджера снова три пинга в запасе.</p>
+
+  <h2>В каком порядке очередь отдаёт карточки</h2>
+  <p class="h2-sub">Когда несколько карточек «созрели» одновременно, они выдаются по приоритету групп; внутри группы — по числу подписчиков (крупные первыми).</p>
+
+  <div class="ladder">
+    <div class="rung">
+      <div class="rung-n">1</div>
+      <div class="rung-name">Диалог<small>dialog</small></div>
+      <div class="rung-desc">Художник ответил, прошло ≥ 2 дней — самое горячее, отвечаем первыми.</div>
+    </div>
+    <div class="rung">
+      <div class="rung-n">2</div>
+      <div class="rung-name">Напомнить<small>remind</small></div>
+      <div class="rung-desc">Мы писали, ответа нет ≥ 2 дней, пингов меньше трёх — пора напомнить.</div>
+    </div>
+    <div class="rung">
+      <div class="rung-n">3</div>
+      <div class="rung-name">Проснулись<small>wake</small></div>
+      <div class="rung-desc">Спящие, у которых наступила дата пробуждения или прошло 4 месяца.</div>
+    </div>
+    <div class="rung">
+      <div class="rung-n">4</div>
+      <div class="rung-name">Завис<small>stale</small></div>
+      <div class="rung-desc">«В работе», но 7 дней без единого касания — страховка от забытых.</div>
+    </div>
+    <div class="rung">
+      <div class="rung-n">5</div>
+      <div class="rung-name">Новые<small>new</small></div>
+      <div class="rung-desc">Ещё ни разу не тронутые карточки.</div>
+    </div>
+    <div class="rung">
+      <div class="rung-n">6</div>
+      <div class="rung-name">Отказ-давно<small>retry</small></div>
+      <div class="rung-desc">Отказавшиеся год назад и раньше — вторая попытка.</div>
+    </div>
+  </div>
+
+  <p class="ladder-note">Капы на группу нет: если проснулись сразу 300 спящих, в режиме «Всё подряд» они целиком встанут раньше всех новых. Именно это менеджер видит как «новые тонут». Обход уже встроен — <b>пачки</b> в шапке потока:</p>
+
+  <div class="lanes">
+    <div class="lane"><b>Всё подряд</b><span>все шесть групп по приоритету — режим по умолчанию</span></div>
+    <div class="lane"><b>Текущие</b><span>только Диалог + Напомнить + Завис</span></div>
+    <div class="lane"><b>Проснулись</b><span>только проснувшиеся и годовалые отказы</span></div>
+    <div class="lane"><b>Новые</b><span>только нетронутые — новые не потеряются</span></div>
+  </div>
+
+  <h2>Все интервалы в одном месте</h2>
+  <p class="h2-sub">Живут в таблице настроек — меняются без правки кода.</p>
+
+  <div class="settings-scroll">
+    <table class="settings">
+      <tr><th>Что регулирует</th><th>Значение</th><th>Ключ настройки</th></tr>
+      <tr><td>Пауза между сообщениями (пинг, ответ)</td><td class="val">2 дня</td><td class="key">ping_wait_days</td></tr>
+      <tr><td>Пингов в серии до автосна</td><td class="val">3</td><td class="key">max_pings</td></tr>
+      <tr><td>«Завис»: дней без касаний в работе</td><td class="val">7 дней</td><td class="key">dialog_stale_days</td></tr>
+      <tr><td>Сон до автопробуждения</td><td class="val">4 мес</td><td class="key">sleep_reactivate_months</td></tr>
+      <tr><td>Возврат после отказа</td><td class="val">12 мес</td><td class="key">refused_reactivate_months</td></tr>
+    </table>
+  </div>
+
+  <h2>Известные шероховатости</h2>
+  <div class="quirks">
+    <div class="quirk">
+      <b>Надпись «вернуться завтра» устарела</b>
+      <span>После перехода на паузу 2 дня карточка в диалоге пишет «вернуться завтра», а реально вернётся через два дня. Точки правки найдены — входит в задачу 76.</span>
+    </div>
+    <div class="quirk">
+      <b>«Проснулись» выше «Новых» — новые тонут</b>
+      <span>Группа проснувшихся (приоритет 3) в режиме «Всё подряд» вытесняет новых (приоритет 5) со страницы. Варианты: поменять порядок групп и/или приучить менеджера к пачкам. Решение — задача 76, ждёт вашего «добро».</span>
+    </div>
+    <div class="quirk">
+      <b>«Просто заметка» не считается обработкой</b>
+      <span>Менеджер пишет заметку, ожидая, что карточка «уйдёт», — а она остаётся в очереди. Это по дизайну, но стоит проговорить в инструкции менеджеру.</span>
+    </div>
+  </div>
+
+  <footer>
+    Источник: crm/lib/rules.php (today_lists, artist_next_action), crm/lib/render.php (шаги, пачки), таблица settings прода. Разведка — отчёт задачи 76 и скаут от 11.07.2026.
+  </footer>
+</main>
+</body>
+</html>
